@@ -8,8 +8,6 @@ from urllib.request import urlopen
 from bencode import encode
 import socket
 
-from torrent import write_torrent_file
-
 def decode_request(path):
     if path[:1] == "?":
         path = path[1:]
@@ -73,16 +71,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         port = package["port"][0]
         peer_id = package["peer_id"][0]
         # for peer leaving flag
-        if "event" in package and package["event"][0] == "stopped":
-            remove_peer(self.server.torrents, info_hash, peer_id)
-            response = {"interval": self.server.interval, "peers": []}
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(encode(response).encode())
-            info("Peer left: %s", package)
-            return
+        if "event" in package:
+            if package["event"][0] == "started":
+                info("Peer joined: %s", package)
+            elif package["event"][0] == "stopped":
+                remove_peer(self.server.torrents, info_hash, peer_id)
+                response = {"interval": self.server.interval, "peers": []}
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(encode(response).encode())
+                info("Peer left: %s", package)
+                return
         add_peer(self.server.torrents, info_hash, peer_id, ip, port)
-
+        print(peer_id, ip, port)
         response = {}
         response["interval"] = self.server.interval
         response["complete"] = 0
@@ -115,20 +116,20 @@ class Tracker:
             self.httpd.handle_request()
     # stop tracker
     def interupt(self):
-        input("Press any key to stop tracker...")
+        input("Press any key to stop tracker... ")
         self.running = False
 
     def run(self):
         if not self.running:
             # reinitialize torrent per run
-            __initTorrent__(f"{self.host}:{self.port}")
             print(f"Starting tracker... at {self.host}:{self.port}")
             self.running = True
-            self.thread = Thread(target=self.runner)
+            # self.thread = Thread(target=self.runner)
             # add interupt function
             self.input_thread = Thread(target=self.interupt)
-            self.thread.start()
+            # self.thread.start()
             self.input_thread.start()
+            self.runner()
 
     def send_dummy_request(self):
         address = f"http://{self.host}:{self.port}"
@@ -138,7 +139,7 @@ class Tracker:
         if self.running:
             self.running = False
             # self.send_dummy_request() #urlopen is not working
-            self.thread.join()
+            # self.thread.join()
 
     def __del__(self):
         self.stop()
@@ -158,13 +159,6 @@ def get_router_ip():
     except Exception as e:
         print("Could not determine local IP:", e)
         return None
-
-def __initTorrent__(tracker_address):
-    print("__initTorrent__")
-    torrentFile='./peer.torrent'
-    comment='init Torrent'
-    write_torrent_file(torrentFile,'peer.txt',tracker_address,\
-        comment)
 
 if __name__ == "__main__":
     # get current router ip
