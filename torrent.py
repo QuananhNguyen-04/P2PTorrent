@@ -65,7 +65,7 @@ def make_torrent_file(file = None, tracker = None, comment = None) -> tuple[dict
 		torrent["comment"] = comment
 
 	torrent["info"] = make_info_dict(file)
-	info_hash = sha1(encode(torrent["info"]).encode()).digest()
+	info_hash = sha1(encode(torrent["info"]).encode()).hexdigest()
 	tracker_url = torrent["announce"]
 	file_name = torrent["info"].get("name", file)
 	magnet_link = f"magnet:?xt=urn:btih:{info_hash}&dn={file_name}&tr={tracker_url}"
@@ -74,18 +74,19 @@ def make_torrent_file(file = None, tracker = None, comment = None) -> tuple[dict
 
 def write_torrent_file(torrent = None, file = None, tracker = None, \
 	comment = None):
-	""" Largely the same as make_torrent_file(), except write the file
-	to the file named in torrent. """
+    """ Largely the same as make_torrent_file(), except write the file
+    to the file named in torrent. """
 
-	if not torrent:
-		raise TypeError("write_torrent_file() requires a torrent filename to write to.")
-
-	data, magnet = make_torrent_file(file = file, tracker = tracker, \
-		comment = comment)
-	with open(torrent, "w") as torrent_file:
-		torrent_file.write(data)
-	with open(torrent.split(".")[0] + ".magnet", "w") as magnet_file:
-		magnet_file.write(magnet)
+    if not torrent:
+        raise TypeError("write_torrent_file() requires a torrent filename to write to.")
+    print(torrent)
+    data, magnet = make_torrent_file(file = file, tracker = tracker, \
+        comment = comment)
+    with open(torrent, "w") as torrent_file:
+        torrent_file.write(data)
+    magnet_filename = torrent.replace(".torrent", ".magnet")
+    with open(magnet_filename, "w") as magnet_file:
+        magnet_file.write(magnet)
 
 def read_torrent_file(torrent_file):
 	""" Given a .torrent file, returns its decoded contents. """
