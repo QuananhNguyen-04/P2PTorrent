@@ -7,7 +7,6 @@ import socket
 from struct import pack, unpack
 from threading import Thread
 from time import sleep, time
-import types
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from util import collapse, slice
@@ -41,7 +40,7 @@ def make_info_dict(file):
 	info["pieces"] = collapse(pieces)
 	return info
 
-def make_torrent_file(file = None, tracker = None, comment = None):
+def make_torrent_file(file = None, tracker = None, comment = None) -> tuple[dict, str]:
 	""" Returns the bencoded contents of a torrent file. """
 
 	if not file:
@@ -66,8 +65,12 @@ def make_torrent_file(file = None, tracker = None, comment = None):
 		torrent["comment"] = comment
 
 	torrent["info"] = make_info_dict(file)
+	info_hash = sha1(encode(torrent["info"])).digest()
+	tracker_url = torrent["announce"]
+	file_name = torrent["info"].get("name", file)
+	magnet_link = f"magnet:?xt=urn:btih:{info_hash}&dn={file_name}&tr={tracker_url}"
 
-	return encode(torrent)
+	return encode(torrent), magnet_link
 
 def write_torrent_file(torrent = None, file = None, tracker = None, \
 	comment = None):
@@ -77,10 +80,12 @@ def write_torrent_file(torrent = None, file = None, tracker = None, \
 	if not torrent:
 		raise TypeError("write_torrent_file() requires a torrent filename to write to.")
 
-	data = make_torrent_file(file = file, tracker = tracker, \
+	data, magnet = make_torrent_file(file = file, tracker = tracker, \
 		comment = comment)
 	with open(torrent, "w") as torrent_file:
 		torrent_file.write(data)
+	with open(torrent.split(".")[0] + ".magnet", "w") as magnet_file:
+		magnet_file.write(magnet)
 
 def read_torrent_file(torrent_file):
 	""" Given a .torrent file, returns its decoded contents. """
@@ -170,6 +175,7 @@ class Torrent():
 		self.running = False
 
 		self.data = read_torrent_file(torrent_file) 
+		print("data:",self.data)
 		self.info_hash = sha1(encode(self.data["info"]).encode()).hexdigest()
 		self.peer_id = generate_peer_id()
 		self.handshake = generate_handshake(self.info_hash, self.peer_id)
