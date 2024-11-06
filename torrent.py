@@ -65,7 +65,7 @@ def make_torrent_file(file = None, tracker = None, comment = None) -> tuple[dict
 		torrent["comment"] = comment
 
 	torrent["info"] = make_info_dict(file)
-	info_hash = sha1(encode(torrent["info"])).digest()
+	info_hash = sha1(encode(torrent["info"]).encode()).digest()
 	tracker_url = torrent["announce"]
 	file_name = torrent["info"].get("name", file)
 	magnet_link = f"magnet:?xt=urn:btih:{info_hash}&dn={file_name}&tr={tracker_url}"
@@ -171,13 +171,13 @@ def send_recv_handshake(handshake, host, port):
 	return data
 
 class Torrent():
-	def __init__(self, torrent_file):
+	def __init__(self, torrent_file, peer_id = None):
 		self.running = False
 
 		self.data = read_torrent_file(torrent_file) 
 		print("data:",self.data)
 		self.info_hash = sha1(encode(self.data["info"]).encode()).hexdigest()
-		self.peer_id = generate_peer_id()
+		self.peer_id = generate_peer_id() if not peer_id else peer_id
 		self.handshake = generate_handshake(self.info_hash, self.peer_id)
 
 	def perform_tracker_request(self, url, info_hash, peer_id):
