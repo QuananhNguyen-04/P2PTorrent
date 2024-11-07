@@ -6,10 +6,11 @@ from socket import inet_ntoa#, AF_INET, SOCK_STREAM
 from threading import Thread
 from struct import pack, unpack
 # from hashlib import sha1
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from torrent import Torrent, decode, generate_peer_id, urlencode, generate_handshake, write_torrent_file
 
 app = Flask(__name__)
+app.debug = True
 peers = []
 
 def request_peers_from_tracker(tracker_url, info_hash, peer_id, port):
@@ -119,6 +120,9 @@ def load_peers():
     except Exception as e:
         print(f"Failed to load peers, error: {str(e)}")
 
+@app.route('/')
+def index():
+    return render_template('./index.html')
 def upload_to_peer(ip, port, info_hash, peer_id, piece_data):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -323,6 +327,6 @@ if __name__ == '__main__':
 
         # announce_peer_leaving(tracker_url, info_hash, peer_id, port)
         peer = Peer(port, f"{get_router_ip()}:9999")
-        peer.add_torrent_to_tracker("file2.txt")
-        app.run(port=5000)
+        peer.add_torrent_to_tracker("peer.txt")
+        app.run(host='0.0.0.0', port=5000)
         peer.close()

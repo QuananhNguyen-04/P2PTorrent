@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload</title>
+</head>
+<body>
+    <h1>Upload Data</h1>
+    <form id="uploadForm">
+        <label for="info_hash">Info Hash:</label>
+        <input type="text" id="info_hash" name="info_hash" required><br><br>
+
+        <label for="peer_id">Peer ID:</label>
+        <input type="text" id="peer_id" name="peer_id" required><br><br>
+
+        <label for="piece_data">Piece Data:</label>
+        <input type="text" id="piece_data" name="piece_data" required><br><br>
+
+        <button type="button" onclick="uploadData()">Submit</button>
+    </form>
+
+    <script>
+        async function uploadData() {
+            const info_hash = document.getElementById('info_hash').value;
+            const peer_id = document.getElementById('peer_id').value;
+            const piece_data = document.getElementById('piece_data').value;
+
+            const response = await fetch('/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    info_hash: info_hash,
+                    peer_id: peer_id,
+                    piece_data: piece_data
+                })
+            });
+
+            const result = await response.json();
+            alert(result.message);
+        }
+    </script>
+</body>
+</html>
