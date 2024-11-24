@@ -21,22 +21,25 @@ CLIENT_VERSION = "0001"
 def make_info_dict(file):
 	""" Returns the info dictionary for a torrent file. """
 
-	with open(file) as f:
+	with open(file, "rb") as f:
 		contents = f.read()
 
-	piece_length = 524288	# TODO: This should change dependent on file size
+	piece_length = 524288	# 512kb
 
 	info = {}
 
 	info["piece length"] = piece_length
 	info["length"] = len(contents)
 	info["name"] = file
-	input_bytes=contents.encode()
-	info["md5sum"] = md5(input_bytes).hexdigest()
+	info["md5sum"] = md5(contents).hexdigest()
 
 	# Generate the pieces
-	pieces = slice(contents, piece_length)
-	pieces = [ sha1(p.encode()).hexdigest() for p in pieces ]
+	# pieces = slice(contents, piece_length)
+	# pieces = [ sha1(p.encode()).hexdigest() for p in pieces ]
+	# info["pieces"] = collapse(pieces)
+	pieces = [
+        sha1(contents[i:i+piece_length]).hexdigest()
+        for i in range(0, len(contents), piece_length)]
 	info["pieces"] = collapse(pieces)
 	return info
 
@@ -150,14 +153,25 @@ def decode_port(port):
 
 	return unpack(">H", port)[0]
 
-def generate_handshake(info_hash, peer_id):
-	""" Returns a handshake. """
-
-	protocol_id = "BitTorrent protocol"
-	len_id = str(len(protocol_id))
-	reserved = "00000000"
-
-	return len_id + protocol_id + reserved + info_hash + peer_id
+def generate_handshake(info_hash: str | bytes, peer_id: str|bytes):
+    """ Returns a handshake. """
+    if isinstance(info_hash, str):
+        info_hash = bytes.fromhex(info_hash)
+    elif isinstance(info_hash, bytes) and len(info_hash) == 40:
+        info_hash = bytes.fromhex(info_hash.decode("utf-8"))
+    if isinstance(peer_id, str):
+        peer_id = peer_id.encode("utf-8")
+    if not isinstance(info_hash, bytes) and isinstance(peer_id, bytes):
+        raise TypeError("The info_hash and peer_id must be a str or bytes")
+    # protocol_id = "BitTorrent protocol"
+    # len_id = str(len(protocol_id))
+    # reserved = "00000000"
+    protocol_id_x = b'\x13BitTorrent protocol'
+    reserved_bytes_x = b'\x00' * 8
+    handshake = protocol_id_x + reserved_bytes_x + info_hash + peer_id
+    # print(handshake)
+    return handshake
+    # return len_id.encode("utf-8") + protocol_id.encode("utf-8") + reserved.encode("utf-8") + info_hash + peer_id
 
 def send_recv_handshake(handshake, host, port):
 	""" Sends a handshake, returns the data we get back. """
