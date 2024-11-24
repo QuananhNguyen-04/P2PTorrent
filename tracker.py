@@ -1,20 +1,18 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from logging import basicConfig, info, INFO
-from socket import inet_aton
+from socket import inet_aton, gethostbyname, gethostname
 from struct import pack
 from urllib.parse import parse_qs
 from urllib.request import urlopen
 from bencode import encode
-import socket
 
-def decode_request(path):
-    if path[:1] == "?":
-        path = path[1:]
-    elif path[:2] == "/?":
-        path = path[2:]
+# decode request path
+def decode_path(path):
+    path = path[1:] if path.startswith("?") else path[2:]
     return parse_qs(path)
 
+# add peer to list
 def add_peer(torrents, info_hash, peer_id, ip, port):
     if info_hash in torrents:
         if (peer_id, ip, port) not in torrents[info_hash]:
@@ -22,18 +20,20 @@ def add_peer(torrents, info_hash, peer_id, ip, port):
     else:
         torrents[info_hash] = [(peer_id, ip, port)]
 
-# update peer list
+# remove peer from list
 def remove_peer(torrents, info_hash, peer_id):
     # in case torrents, torrents[info] are dicts
     # if info_hash in torrents and peer_id in torrents[info_hash]:
     #     del torrents[info_hash][peer_id] 
     if info_hash in torrents:
+        torrents[info_hash] = [peer for peer in torrents[info_hash] if peer[0] != peer_id]
         # Find and remove the peer tuple that matches peer_id, ip, and port
         torrents[info_hash] = [
             peer for peer in torrents[info_hash]
             if not (peer[0] == peer_id)
         ]
 
+# make compact peer list
 def make_compact_peer_list(peer_list):
     peer_string = b""
     for peer in peer_list:
@@ -42,6 +42,7 @@ def make_compact_peer_list(peer_list):
         peer_string += (ip + port)
     return peer_string
 
+# make full peer list
 def make_peer_list(peer_list):
     peers = []
     for peer in peer_list:
@@ -52,38 +53,39 @@ def make_peer_list(peer_list):
         peers.append(p)
     return peers
 
-def peer_list(peer_list, compact):
+# get peer list
+def get_peer_list(peer_list, compact):
     if compact:
         return make_compact_peer_list(peer_list)
     else:
         return make_peer_list(peer_list)
 
-class RequestHandler(BaseHTTPRequestHandler):
+class TrackerRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        package = decode_request(self.path)
-        if not package:
+        query = decode_path(self.path)
+        if not query:
             self.send_error(403)
             return
 
-        info_hash = package["info_hash"][0]
-        # compact = bool(int(package["compact"][0]))
+        info_hash = query["info_hash"][0]
+
         ip = self.client_address[0]
-        port = package["port"][0]
-        peer_id = package["peer_id"][0]
-        # for peer leaving flag
-        if "event" in package:
-            if package["event"][0] == "started":
-                info("Peer joined: %s", package)
-            elif package["event"][0] == "stopped":
+        port = query["port"][0]
+        peer_id = query["peer_id"][0]
+        if "event" in query:
+            if query["event"][0] == "started":
+                info("Peer joined: %s", query)
+            elif query["event"][0] == "stopped":
                 remove_peer(self.server.torrents, info_hash, peer_id)
                 response = {"interval": self.server.interval, "peers": []}
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(encode(response).encode())
-                info("Peer left: %s", package)
+                info("Peer left: %s", query)
                 return
-        add_peer(self.server.torrents, info_hash, peer_id, ip, port)
-        print(peer_id, ip, port)
+        if info_hash not in self.server.torrents or peer_id not in self.server.torrents[info_hash]:
+            add_peer(self.server.torrents, info_hash, peer_id, ip, port)
+
         response = {}
         response["interval"] = self.server.interval
         response["complete"] = 0
@@ -93,18 +95,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encode(response).encode())
 
-        info("PACKAGE: %s", package)
+        info("PACKAGE: %s", query)
         info("RESPONSE: %s", response)
-
-    def log_message(self, format, *args):
-        return
 
 class Tracker:
     def __init__(self, host="0.0.0.0", port=9999, interval=5, log="tracker.log"):
         self.host = host
         self.port = port
         self.server_class = HTTPServer
-        self.httpd = self.server_class((self.host, self.port), RequestHandler)
+        self.httpd = self.server_class((self.host, self.port), TrackerRequestHandler)
         self.running = False
         self.server_class.interval = interval
         self.httpd.timeout = 5 # closing tracker supporter
@@ -137,7 +136,10 @@ class Tracker:
 
     def stop(self):
         if self.running:
+            print(f"Stopping tracker at {self.host}:{self.port}")
             self.running = False
+            self.httpd.server_close()
+
             # self.send_dummy_request() #urlopen is not working
             # self.thread.join()
 
@@ -147,21 +149,8 @@ class Tracker:
         self.input_thread.join()
         self.httpd.server_close()
 
-# for adapating to each network
-def get_router_ip():
-    try:
-        # Connect to an external site and get the socket's local address
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))  # Google's DNS server
-        local_ip = s.getsockname()[0]
-        s.close()
-        return local_ip
-    except Exception as e:
-        print("Could not determine local IP:", e)
-        return None
-
 if __name__ == "__main__":
-    # get current router ip
-    host = get_router_ip()
+    host = gethostbyname(gethostname())
+    
     tracker = Tracker(host=host)
     tracker.run()
