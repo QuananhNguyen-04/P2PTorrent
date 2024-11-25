@@ -2,44 +2,104 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Upload</title>
+    <title>Peer Information</title>
 </head>
 <body>
-    <h1>Upload Data</h1>
-    <form id="uploadForm">
-        <label for="info_hash">Info Hash:</label>
-        <input type="text" id="info_hash" name="info_hash" required><br><br>
+    <h1>Peer Information</h1>
+    <div>
+        <strong>Peer ID:</strong> {{peer_id}}
+    </div>
 
-        <label for="peer_id">Peer ID:</label>
-        <input type="text" id="peer_id" name="peer_id" required><br><br>
+    <h2>Available Torrents</h2>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Filename</th>
+                <th>Action</th>
+            </tr>
+        </thead>
 
-        <label for="piece_data">Piece Data:</label>
-        <input type="text" id="piece_data" name="piece_data" required><br><br>
+        <tbody id="torrent-list">
+            {% for info_hash, torrent in torrents.items() %}
+            <tr>
+                <td>{{ torrent.filename }}</td>
+                <td>
+                    <form action="{{ url_for('download_file', info_hash=info_hash, filename=torrent.filename) }}" method="post">
+                        <button type="submit">Download</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            <!-- Rows will be populated here -->
+        </tbody>
+    </table>
 
-        <button type="button" onclick="uploadData()">Submit</button>
-    </form>
+    <div>
+        <h2>Upload More Files</h2>
+        <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data">
+            <input type="file" name="file">
+            <button type="submit">Upload File</button>
+        </form>
+    </div>
+
+    <div>
+        <h2>Regist Magnet Link</h2>
+        <form action="{{ url_for('join') }}" method="post" enctype="multipart/form-data">
+            <label for="magnet">Magnet Link</label>
+            <input type="text" name="magnet" id="magnet">
+            <button type="submit">Join Torrent</button>
+            <br>
+            <label for="torrent_file">Or Upload Magnet File</label>
+            <br>
+            <input type="file" name="magnet_file" id="magnet_file" accept=".magnet">
+            <button type="submit">Join Torrent</button>
+        </form>
+    </div>
 
     <script>
-        async function uploadData() {
-            const info_hash = document.getElementById('info_hash').value;
-            const peer_id = document.getElementById('peer_id').value;
-            const piece_data = document.getElementById('piece_data').value;
+        // Fetch the peer information and torrents from the server
+        /* async function fetchPeers() {
+            const response = await fetch('/get_peers');
+            const torrents = await response.json();
+            const torrentList = document.getElementById('torrent-list');
+            console.log(torrents)
+            // Display the Peer ID at the top
+            const firstTorrent = Object.values(torrents)[0];
+            const peerId = firstTorrent ? firstTorrent.peer_id : "Unknown Peer ID";
 
-            const response = await fetch('/upload', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    info_hash: info_hash,
-                    peer_id: peer_id,
-                    piece_data: piece_data
-                })
-            });
+            // Display the Peer ID at the top
+            document.getElementById('peer-id').textContent = peerId;
 
-            const result = await response.json();
-            alert(result.message);
+            // Populate torrents in the table
+            for (const [infoHash, torrentData] of Object.entries(torrents)) {
+                const row = document.createElement('tr');
+                // Filename
+                const filenameCell = document.createElement('td');
+                filenameCell.textContent = torrentData.filename;
+                row.appendChild(filenameCell);
+
+                // Download action button
+                const actionCell = document.createElement('td');
+                
+                const downloadForm = document.createElement('form');
+                downloadForm.action = `/download`;  // Adjust URL with the peer_id
+                downloadForm.method = 'post';  // Method for form submission
+
+                const downloadButton = document.createElement('button');
+                downloadButton.type = 'submit';  // Button submits the form
+                downloadButton.textContent = 'Download';
+                downloadForm.appendChild(downloadButton);
+                actionCell.appendChild(downloadForm);
+                row.appendChild(actionCell);
+
+                torrentList.appendChild(row);
+            }
         }
+ */
+        // Download the torrent file
+        
+
+        // Fetch peers when the page loads
     </script>
 </body>
 </html>
