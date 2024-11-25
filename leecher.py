@@ -12,7 +12,7 @@ from struct import pack, unpack
 from file_transfer import send_file, receive_file, send_torrent
 
 # from hashlib import sha1
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, redirect, request, jsonify, render_template, url_for
 from torrent import (
     Torrent,
     decode,
@@ -305,35 +305,23 @@ def upload_to_peer(ip, port, info_hash, peer_id, piece_data):
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
-    print(request.files)
-    print(request.form.to_dict())
-    file = request.files["file"]
-    filename = file.filename
-    file.save(os.path.join("files", filename))
-    print(f"File {filename} saved to files/{filename}")
+    try:
 
+        file = request.files["file"]
+        file_path = os.path.join(os.getcwd(), file.filename)
 
-    # info_hash = request.json.get("info_hash")
-    # peer_id = request.json.get("peer_id")
-    # piece_data = request.json.get("piece_data")
+        file.save(file_path)
+        filename = file.filename
+        print(f"File {filename} saved to {file_path}")
 
-    # if not info_hash or not peer_id or not piece_data:
-    #     return jsonify({"error": "Invalid info hash, peer ID, or piece data!"}), 400
+        peer = initialize_peer_instance()
 
-    # threads = []
-    # for peer in peers:
-    #     ip = peer["ip"]
-    #     port = int(peer["port"])
-    #     t = Thread(
-    #         target=upload_to_peer, args=(ip, port, info_hash, peer_id, piece_data)
-    #     )
-    #     threads.append(t)
-    #     t.start()
+        peer.add_torrent_to_tracker(filename)
+        print(f"Torrent for {filename} added to tracker")
 
-    # for t in threads:
-    #     t.join()
-
-    return jsonify({"message": "Upload initiated to all peers!"}), 201
+        return redirect(url_for("index"))
+    except Exception as e:
+        return {"error": str(e)}, 400
 
 
 def download_from_peer(
@@ -491,8 +479,43 @@ def download_file(info_hash, filename):
                 f.write(piece_file.read())
             os.remove(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}")
 
-
     return jsonify({"message": "Download initiated from all peers!"}), 201
+
+
+@app.route("/joinnew", methods=["POST"])
+def join():
+    try:
+        peer = initialize_peer_instance()
+        peer_id = peer.peer_id
+        port = peer.port
+
+        magnet_text = request.form.get("magnet")
+        magnet_file = request.files.get("magnet_file")
+        if magnet_text:
+            print(magnet_text)
+
+        elif magnet_file:
+            print(magnet_file)
+            magnet_text = magnet_file.read().decode("utf-8").strip()
+            print(f"Magnet link extracted from file: {magnet_text}")
+        else:
+            return {"error": "Invalid magnet link or file"}, 400
+
+        info_hash, tracker_url, filename = parse_magnet_link(magnet_text)
+        request_peers_from_tracker(tracker_url, info_hash, peer_id, port)
+        print(
+            f"Connecting to tracker for {filename if filename else 'unknown file'}..."
+        )
+
+        peer.torrents[info_hash] = {
+            "filename": filename,
+            "torrentFile": filename,
+            "peer_id": peer_id,
+        }
+
+        return redirect(url_for("index"))
+    except Exception as e:
+        return {"error": str(e)}, 400
 
 
 def __initTorrent__(tracker_address, filename="peer.txt", torrentFile="./peer.torrent"):
@@ -552,7 +575,7 @@ class Peer:
     def connect_to_tracker_via_magnet(self, magnet_file):
         """Parses the magnet link and requests peers from the tracker."""
         magnet_link = open(magnet_file, "r").read()
-        # print(magnet_link)
+
         info_hash, tracker_url, file_name = parse_magnet_link(magnet_link)
 
         # Connect to the tracker
@@ -574,6 +597,7 @@ class Peer:
         self.server.stop()
 
     def close(self):
+        
         for info_hash in self.torrents:
             announce_peer_leaving(
                 self.tracker_address,
@@ -594,7 +618,7 @@ if __name__ == "__main__":
             TypeError("The port must be between 1025 and 65535")
 
         peer_instance = Peer(port, f"{get_router_ip()}:9999")
-        peer_instance.connect_to_tracker_via_magnet("./Interface.magnet")
+        # peer_instance.connect_to_tracker_via_magnet("./Interface.magnet")
         server_thread = Thread(target=peer_instance.start_server, daemon=True)
         server_thread.start()
         app.run(port=peer_instance.port)
