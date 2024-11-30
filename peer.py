@@ -437,6 +437,9 @@ def download_from_peer(
                 if message_id != 7:
                     raise Exception("Expected piece message (message ID 7)")
                 piece_data = s.recv(data_length)
+                while len(piece_data) < data_length:
+                    additional_data = s.recv(data_length - len(piece_data))
+                    piece_data += additional_data
                 hash_data_block[piece_offset] = piece_data
                 piece_offset = received_begin_offset
             with open(
