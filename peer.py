@@ -354,7 +354,7 @@ def upload_file():
 
 
 def download_from_peer(
-    ip, port, info_hash, peer_id, filename, meta_info, meta_lock, pieces, initialize 
+    ip, port, info_hash, peer_id, filename, meta_info, meta_lock, pieces, initialize = True
 ):
     filename_without_extension = filename.split(".")[0]
 
