@@ -1,13 +1,15 @@
+import ipaddress
 from math import ceil
 import os
 from queue import Queue
+import time
 from urllib.parse import parse_qs, unquote, urlparse
 import requests
 import socket
 
 # from socket import inet_ntoa
-from socket import inet_ntoa  # , AF_INET, SOCK_STREAM
-from threading import Lock, Thread
+from socket import inet_ntoa, timeout
+from threading import Lock, Thread, current_thread
 from struct import pack, unpack
 from file_transfer import send_file, receive_file, send_torrent
 
@@ -25,7 +27,6 @@ from torrent import (
 app = Flask(__name__)
 peers = []
 peer_instance = None
-
 
 def get_router_ip():
     return socket.gethostbyname(socket.gethostname())
@@ -84,6 +85,29 @@ def request_peers_from_tracker(tracker_url, info_hash, peer_id, port):
         return peers
 
 
+def announce_leecher_joining(tracker_url, info_hash, peer_id, port):
+    params = {
+        "info_hash": info_hash,
+        "peer_id": peer_id,
+        "port": port,
+        "uploaded": 0,
+        "downloaded": 0,
+        "left": 1,
+        "compact": 1,
+        "event": "started",
+    }
+    url = f"http://{tracker_url}?{urlencode(params)}"
+    try:
+        # Send the request to the tracker
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        if response.status_code == 200:
+            print("Tracker informed of peer arrival")
+    except requests.RequestException as e:
+        print(f"Failed to announce arrival: {e}")
+
+
 # Announce peer's departure to tracker
 def announce_peer_leaving(tracker_url, info_hash, peer_id, port):
     # Build request parameters with 'stopped' event to signal departure
@@ -107,6 +131,30 @@ def announce_peer_leaving(tracker_url, info_hash, peer_id, port):
             print("Tracker informed of peer departure")
     except requests.RequestException as e:
         print(f"Failed to announce departure: {e}")
+
+# Announce peer's download completion to tracker
+def announce_download_complete(tracker_url, info_hash, peer_id, port):
+    # Build request parameters with 'completed' event to signal download completion
+    params = {
+        "info_hash": info_hash,
+        "peer_id": peer_id,
+        "port": port,
+        "uploaded": 0,
+        "downloaded": 0,
+        "left": 0,
+        "compact": 1,
+        "event": "completed",
+    }
+    url = f"http://{tracker_url}?{urlencode(params)}"
+    try:
+        # Send the request to the tracker
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        if response.status_code == 200:
+            print("Tracker informed of download completion")
+    except requests.RequestException as e:
+        print(f"Failed to announce download completion: {e}")
 
 
 # Parse a magnet link for info_hash and tracker URL
@@ -172,17 +220,17 @@ class PeerServer:
             # print(f"Received request with length {length}")
             message = client_socket.recv(length)
             message_id = message[0]  # The first byte after length is the message ID
-            print(message_id)
+            # print(message_id)
             filename = self.peer.torrents[info_hash]["filename"]
             filename_without_extension = filename.split(".")[0]
             if message_id == 6:
                 print("=======\nHandling request")
                 # Handle a request message (message ID 6)
                 _, piece_index, begin, piece_length = unpack(">BIII", message)
-                print(
-                    f"Request received for piece {piece_index} from offset {begin} with length {piece_length}"
-                )
-
+                # print(
+                #     f"Request received for piece {piece_index} from offset {begin} with length {piece_length}"
+                # )
+                print(f"Sending data for piece {piece_index}")
                 # Here you would respond with the requested piece data.
                 if info_hash in self.peer.torrents:
                     send_file(client_socket, filename, piece_index, begin, piece_length)
@@ -197,9 +245,9 @@ class PeerServer:
                 # Handle a piece message (message ID 7)
                 _, piece_index, begin = unpack(">BII", message[:9])
                 piece_data = message[9:]
-                print(
-                    f"Received piece {piece_index} starting at {begin} with data length {len(piece_data)}"
-                )
+                # print(
+                #     f"Received piece {piece_index} starting at {begin} with data length {len(piece_data)}"
+                # )
 
             # Add handling for other message types as necessary
             else:
@@ -245,25 +293,6 @@ class PeerServer:
         if self.accept_thread:
             self.accept_thread.join()
         print("Peer server has been stopped.")
-
-
-def connect_to_tracker_via_magnet(magnet_link, peer_id, port):
-    """Parses the magnet link and requests peers from the tracker."""
-    info_hash, tracker_url, file_name = parse_magnet_link(magnet_link)
-
-    # Connect to the tracker
-    print(f"Connecting to tracker for {file_name if file_name else 'unknown file'}...")
-    request_peers_from_tracker(tracker_url, info_hash, peer_id, port)
-
-
-def load_peers():
-    try:
-        with open("peers_list.txt", "r") as file:
-            for line in file:
-                ip, port = line.strip().split(":")
-                peers.append({"ip": ip, "port": int(port)})
-    except Exception as e:
-        print(f"Failed to load peers, error: {str(e)}")
 
 
 @app.route("/")
@@ -325,7 +354,7 @@ def upload_file():
 
 
 def download_from_peer(
-    ip, port, info_hash, peer_id, filename, meta_info, meta_lock, pieces
+    ip, port, info_hash, peer_id, filename, meta_info, meta_lock, pieces, initialize 
 ):
     filename_without_extension = filename.split(".")[0]
 
@@ -364,20 +393,26 @@ def download_from_peer(
                     meta_info.update(metadata_info)
             except Exception as e:
                 print(f"Failed to exchange metadata, error: {str(e)}")
-        print("meta_info:", meta_info)
+        # print("meta_info:", meta_info)
 
         if meta_info:
-            file_length = metadata_info["length"]
-            piece_length = metadata_info["piece length"]
-            print(meta_info)
-            piece_num = ceil(file_length / piece_length)
             with meta_lock:
-                if pieces is None:
-                    pieces = list(range(piece_num))
-        print("pieces:", pieces)
+                file_length = meta_info["length"]
+                piece_length = meta_info["piece length"]
+                piece_num = ceil(file_length / piece_length)
+                temp = Queue(maxsize=piece_num)
+                for i in range(piece_num):
+                    temp.put(i)
+                if initialize is False:
+                    initialize = True
+                    pieces = temp
+
+        print("All pieces in queue:", pieces.qsize())
+        print(f"{current_thread().name}, {ip}:{port} started downloading")
         # Request a piece (assuming we're requesting the first piece, piece index = 0)
-        while len(pieces) > 0:
-            piece_index = pieces.pop(0)
+        while not pieces.empty():
+            piece_index = pieces.get()
+            print("Remaining pieces in queue:", list(pieces.queue)[:5])
             piece_offset = 0
             max_offset = (
                 min(file_length, (piece_index + 1) * piece_length)
@@ -404,21 +439,20 @@ def download_from_peer(
                 piece_data = s.recv(data_length)
                 hash_data_block[piece_offset] = piece_data
                 piece_offset = received_begin_offset
-                print("piece_offset", piece_offset)
-            with open(f"{filename.split('.')[0]}_{piece_index}.{filename.split('.')[1]}", "wb") as f:
+            with open(
+                f"{filename.split('.')[0]}_{piece_index}.{filename.split('.')[1]}", "wb"
+            ) as f:
                 for offset, piece_data in sorted(hash_data_block.items()):
                     f.write(piece_data)
-
+            
             print(
                 f"Downloaded piece {piece_index} from {ip}:{port} to {filename}_{piece_index}"
             )
 
-    except s.timeout:
+    except timeout:
         print("Connection timed out - no response from peer.")
     except ConnectionRefusedError:
         print("Connection refused by the peer.")
-    except Exception as e:
-        print(f"Error: {e}")
     except Exception as e:
         print(f"Failed to download from {ip}:{port}, error: {str(e)}")
     finally:
@@ -433,18 +467,18 @@ def download_file(info_hash, filename):
         return jsonify({"error": "Invalid info hash!"}), 400
     peer = initialize_peer_instance()
     peer_id = peer.peer_id
+    port = peer.port
     tracker_url = peer.tracker_address
     peers = request_peers_from_tracker(tracker_url, info_hash, peer.peer_id, peer.port)
     peers = [peer for peer in peers if peer["peer id"] != peer_id]
+    unique_peers = [dict(t) for t in {tuple(sorted(d.items())) for d in peers}]
     threads = []
     metadata_info = {}
     metadata_lock = Lock()
-    data_pieces = None
-    for peer in peers:
-        ip = peer["ip"]
-        port = int()
-
-    for peer in peers:
+    initialize = False
+    data_pieces = Queue()
+    print(unique_peers)
+    for peer in unique_peers:
         if peer["peer id"] == peer_id:
             continue
         ip = peer["ip"]
@@ -461,6 +495,7 @@ def download_file(info_hash, filename):
                 metadata_info,
                 metadata_lock,
                 data_pieces,
+                initialize,
             ),
         )
         threads.append(t)
@@ -472,13 +507,47 @@ def download_file(info_hash, filename):
         return jsonify({"error": "Failed to exchange metadata"}), 500
     piece_num = ceil(metadata_info["length"] / metadata_info["piece length"])
     # merge files
+    missing_pieces = Queue()
+    for i in range(piece_num):
+        if not os.path.exists(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}"):
+            missing_pieces.put_nowait(i)
+    print(f"Missing {missing_pieces.qsize()} pieces")
+    if missing_pieces.qsize() > 0:
+        threads = []
+        for peer in unique_peers:
+            if peer["peer id"] == peer_id:
+                continue
+            ip = peer["ip"]
+            port = int(peer["port"])
+            print(f"Downloading {filename} from {ip}:{port}")
+            t = Thread(
+                target=download_from_peer,
+                args=(
+                    ip,
+                    port,
+                    info_hash,
+                    peer_id,
+                    filename,
+                    metadata_info,
+                    metadata_lock,
+                    missing_pieces,
+                ),
+            )
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+            
     with open(filename.split(".")[0] + "new." + filename.split(".")[1], "wb") as f:
         for i in range(piece_num):
             print(f"merging {filename}_{i}")
-            with open(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}", "rb") as piece_file:
+            with open(
+                f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}", "rb"
+            ) as piece_file:
                 f.write(piece_file.read())
-            os.remove(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}")
-
+    for i in range(piece_num):
+        os.remove(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}")
+    announce_download_complete(tracker_url, info_hash, peer_id, port)
     return jsonify({"message": "Download initiated from all peers!"}), 201
 
 
@@ -502,7 +571,7 @@ def join():
             return {"error": "Invalid magnet link or file"}, 400
 
         info_hash, tracker_url, filename = parse_magnet_link(magnet_text)
-        request_peers_from_tracker(tracker_url, info_hash, peer_id, port)
+        announce_leecher_joining(tracker_url, info_hash, peer_id, port)
         print(
             f"Connecting to tracker for {filename if filename else 'unknown file'}..."
         )
@@ -582,7 +651,7 @@ class Peer:
         print(
             f"Connecting to tracker for {file_name if file_name else 'unknown file'}..."
         )
-        request_peers_from_tracker(tracker_url, info_hash, self.peer_id, self.port)
+        announce_leecher_joining(tracker_url, info_hash, self.peer_id, self.port)
 
         self.torrents[info_hash] = {
             "filename": file_name,
@@ -597,7 +666,7 @@ class Peer:
         self.server.stop()
 
     def close(self):
-        
+
         for info_hash in self.torrents:
             announce_peer_leaving(
                 self.tracker_address,
@@ -610,15 +679,20 @@ class Peer:
 if __name__ == "__main__":
 
     # host = get_router_ip()
-    # port: str = input("Type your port... ")  # Get decide port (for testing)
-    port = "5000"
+    port: str = input("Type your port... ")  # Get decide port (for testing)
+    tracker_address = input("Type your tracker address... ")
+    # port = "4900"
+    try:
+        ipaddress.ip_address(tracker_address.split(":")[0])
+    except ValueError:
+        raise TypeError("The tracker address's IP is invalid")
     if port.isdigit():  # verify the testing
         port = int(port)
         if not 1024 < port < 65536:
             TypeError("The port must be between 1025 and 65535")
 
-        peer_instance = Peer(port, f"{get_router_ip()}:9999")
-        # peer_instance.connect_to_tracker_via_magnet("./Interface.magnet")
+        peer_instance = Peer(port, f"{tracker_address}:9999")
+        # peer_instance.add_torrent_to_tracker("Interface.zip")
         server_thread = Thread(target=peer_instance.start_server, daemon=True)
         server_thread.start()
         app.run(port=peer_instance.port)

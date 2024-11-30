@@ -68,9 +68,9 @@ def send_file(
             # Send the requested piece data only
             bytes_to_read = min(BUFFER_SIZE, end_position - start_position)
             bytes_read = f.read(bytes_to_read)
-            print(start_position, end_position, len(bytes_read))
+            # print(start_position, end_position, len(bytes_read))
             new_offset = begin_offset + len(bytes_read)
-            print(new_offset)
+            # print(new_offset)
             message = (
                 pack(
                     ">IBIII",
@@ -85,9 +85,9 @@ def send_file(
             # print(message)
             client_socket.sendall(message)
 
-        print(
-            f"Sent {piece_length} bytes from file: {filename}, starting at offset {start_position}"
-        )
+        # print(
+        #     f"Sent {piece_length} bytes from file: {filename}, starting at offset {start_position}"
+        # )
 
     except Exception as e:
         print(f"Error sending file piece: {e}")
