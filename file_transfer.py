@@ -82,6 +82,8 @@ def send_file(
                 )
                 + bytes_read
             )
+            print(begin_offset)
+            print(len(bytes_read))
             # print(message)
             client_socket.sendall(message)
 
