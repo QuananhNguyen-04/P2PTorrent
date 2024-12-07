@@ -396,19 +396,16 @@ def download_from_peer(
         # print("meta_info:", meta_info)
 
         if meta_info:
-            with meta_lock:
-                file_length = meta_info["length"]
-                piece_length = meta_info["piece length"]
-                piece_num = ceil(file_length / piece_length)
-                temp = Queue(maxsize=piece_num)
-                for i in range(piece_num):
-                    temp.put(i)
-                if initialize is False:
-                    initialize = True
-                    pieces = temp
+            file_length = meta_info["length"]
+            piece_length = meta_info["piece length"]
+            piece_num = ceil(file_length / piece_length)
+            if pieces.qsize() == 0:
+                with meta_lock:
+                    for i in range(piece_num):
+                        pieces.put(i)
 
         print("All pieces in queue:", pieces.qsize())
-        print(f"{current_thread().name}, {ip}:{port} started downloading")
+        print(f"{current_thread().name}, {ip}:{port} started downloading {pieces.qsize()} pieces")
         # Request a piece (assuming we're requesting the first piece, piece index = 0)
         while not pieces.empty():
             piece_index = pieces.get()
@@ -550,6 +547,13 @@ def download_file(info_hash, filename):
                 f.write(piece_file.read())
     for i in range(piece_num):
         os.remove(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}")
+
+    __initTorrent__(tracker_url, filename.split(".")[0] + "new." + filename.split(".")[1], filename.split(".")[0] + "new." + filename.split(".")[1] + ".torrent") 
+    new_torrent = Torrent(filename.split(".")[0] + "new." + filename.split(".")[1] + ".torrent")
+    new_info_hash = new_torrent.info_hash
+    if new_info_hash != info_hash:
+        raise Exception("Download failed, file hashes do not match")
+    
     announce_download_complete(tracker_url, info_hash, peer_id, port)
     return jsonify({"message": "Download initiated from all peers!"}), 201
 
@@ -622,7 +626,7 @@ class Peer:
             "torrentFile": torrentFile,
             "peer_id": self.peer_id,
         }
-        # print(self.torrents)
+        return info_hash
 
     def parse_magnet_link(magnet_link):
         """Extracts info_hash and tracker from a magnet link."""
