@@ -22,7 +22,7 @@
         <tbody id="torrent-list">
             {% for info_hash, torrent in torrents.items() %}
             <tr>
-                <td>{{ torrent.filename }}</td>
+                <td>{{ torrent.filename}} | {{info_hash}}</td>
                 <td>
                     <form action="{{ url_for('download_file', info_hash=info_hash, filename=torrent.filename) }}" method="post">
                         <button type="submit">Download</button>

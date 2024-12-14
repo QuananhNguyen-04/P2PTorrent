@@ -366,6 +366,8 @@ def download_from_peer(
         if message_id != 5:
             raise Exception("Expected torrent file (message ID 5)")
         torrent_data = s.recv(piece_length)
+        while len(torrent_data) < piece_length:
+            torrent_data += s.recv(piece_length - len(torrent_data))
         print(torrent_data)
         metadata = decode(torrent_data.decode())
 
@@ -374,6 +376,7 @@ def download_from_peer(
         return metadata["info"]
 
     def exchange_handshake(s, info_hash, peer_id):
+        print("exchange_handshake")
         handshake = generate_handshake(info_hash, peer_id)
         print(handshake)
         s.sendall(handshake)
@@ -383,6 +386,7 @@ def download_from_peer(
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print(f"Connecting to {ip}:{port}")
         s.connect((ip, port))
         exchange_handshake(s, info_hash, peer_id)
 
@@ -548,13 +552,16 @@ def download_file(info_hash, filename):
     for i in range(piece_num):
         os.remove(f"{filename.split('.')[0]}_{i}.{filename.split('.')[1]}")
 
-    __initTorrent__(tracker_url, filename.split(".")[0] + "new." + filename.split(".")[1], filename.split(".")[0] + "new." + filename.split(".")[1] + ".torrent") 
+    __initTorrent__(tracker_url, filename.split(".")[0] + "." + filename.split(".")[1], filename.split(".")[0] + "new." + filename.split(".")[1] + ".torrent") 
     new_torrent = Torrent(filename.split(".")[0] + "new." + filename.split(".")[1] + ".torrent")
     new_info_hash = new_torrent.info_hash
+    print(new_info_hash)
+    print(info_hash)
     if new_info_hash != info_hash:
         raise Exception("Download failed, file hashes do not match")
     
     announce_download_complete(tracker_url, info_hash, peer_id, port)
+    os.remove(f"{filename.split(".")[0]}new.{filename.split(".")[1]}.torrent")
     return jsonify({"message": "Download initiated from all peers!"}), 201
 
 
